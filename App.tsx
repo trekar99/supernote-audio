@@ -4,8 +4,9 @@
  * @format
  */
 
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
+  DeviceEventEmitter,
   FlatList,
   Pressable,
   StatusBar,
@@ -18,6 +19,7 @@ import {
   audioEvents,
   ensureReadPermission,
   getStatus,
+  isPermissionFailure,
   listTracks,
   pause,
   play,
@@ -29,6 +31,7 @@ import {
 } from './src/audio';
 
 const EMPTY = 'No audio files in Document/Audio';
+const EMPTY_FOLDER = 'This folder is empty';
 const PERMISSION = 'Read permission is required to load audio files.';
 const SEEK_MS = 15000;
 
@@ -50,6 +53,8 @@ function formatTime(ms: number): string {
 
 function App(): React.JSX.Element {
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
+  const [folder, setFolder] = useState<string | null>(null);
+  const folderRef = useRef<string | null>(null);
   const [status, setStatus] = useState<AudioStatus>(idleStatus);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -57,6 +62,24 @@ function App(): React.JSX.Element {
   const apply = useCallback((next: AudioStatus) => {
     setStatus(next);
     setMessage(null);
+  }, []);
+
+  const loadLibrary = useCallback(async () => {
+    const [library, current] = await Promise.all([
+      listTracks(folderRef.current),
+      getStatus(),
+    ]);
+    folderRef.current = library.root ? null : library.path;
+    setFolder(folderRef.current);
+    setTracks(library.entries);
+    setStatus(current);
+    setMessage(
+      library.entries.length === 0
+        ? library.root
+          ? EMPTY
+          : EMPTY_FOLDER
+        : null,
+    );
   }, []);
 
   const load = useCallback(async () => {
@@ -67,19 +90,38 @@ function App(): React.JSX.Element {
         setMessage(PERMISSION);
         return;
       }
-      const [files, current] = await Promise.all([listTracks(), getStatus()]);
-      setTracks(files);
-      setStatus(current);
-      setMessage(files.length === 0 ? EMPTY : null);
+      await loadLibrary();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not load audio');
+      if (!isPermissionFailure(error)) {
+        setTracks([]);
+        setMessage('Could not load audio');
+        return;
+      }
+      const allowed = await ensureReadPermission(true).catch(() => false);
+      if (!allowed) {
+        setTracks([]);
+        setMessage(PERMISSION);
+        return;
+      }
+      try {
+        await loadLibrary();
+      } catch {
+        setTracks([]);
+        setMessage(PERMISSION);
+      }
     }
-  }, []);
+  }, [loadLibrary]);
 
   useEffect(() => {
     load();
     const subscription = audioEvents.addListener('AudioStatus', apply);
-    return () => subscription.remove();
+    const refresh = DeviceEventEmitter.addListener('AudioLibraryRefresh', () => {
+      load();
+    });
+    return () => {
+      subscription.remove();
+      refresh.remove();
+    };
   }, [apply, load]);
 
   useEffect(() => {
@@ -111,7 +153,9 @@ function App(): React.JSX.Element {
       try {
         apply(await action());
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : 'Playback failed');
+        setMessage(
+          isPermissionFailure(error) ? PERMISSION : 'Playback failed',
+        );
       } finally {
         setBusy(false);
       }
@@ -130,10 +174,30 @@ function App(): React.JSX.Element {
       run(atEnd ? () => play(status.path as string) : resume);
       return;
     }
-    if (tracks[0]) {
-      run(() => play(tracks[0].path));
+    const firstFile = tracks.find(track => track.kind === 'file');
+    if (firstFile) {
+      run(() => play(firstFile.path));
     }
   };
+
+  const openFolder = (path: string) => {
+    folderRef.current = path;
+    load();
+  };
+
+  const goUp = () => {
+    const current = folderRef.current;
+    if (!current) {
+      return;
+    }
+    const slash = current.lastIndexOf('/');
+    folderRef.current = slash > 0 ? current.slice(0, slash) : null;
+    load();
+  };
+
+  const folderName = folder
+    ? folder.slice(folder.lastIndexOf('/') + 1)
+    : 'Audio';
 
   const controls = [
     {label: status.playing ? 'Pause' : 'Play', onPress: onPlayPause},
@@ -146,14 +210,23 @@ function App(): React.JSX.Element {
     <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       <View style={styles.header}>
-        <Text style={styles.title}>Audio</Text>
-        <Pressable
-          style={styles.close}
-          onPress={() => {
-            PluginManager.closePluginView();
-          }}>
-          <Text style={styles.closeLabel}>Close</Text>
-        </Pressable>
+        <Text style={styles.title} numberOfLines={1}>
+          {folderName}
+        </Text>
+        <View style={styles.headerActions}>
+          {folder ? (
+            <Pressable style={styles.close} onPress={goUp}>
+              <Text style={styles.closeLabel}>Up</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={styles.close}
+            onPress={() => {
+              PluginManager.closePluginView();
+            }}>
+            <Text style={styles.closeLabel}>Close</Text>
+          </Pressable>
+        </View>
       </View>
 
       <FlatList
@@ -164,15 +237,21 @@ function App(): React.JSX.Element {
           <Text style={styles.empty}>{message ?? EMPTY}</Text>
         }
         renderItem={({item}) => {
-          const selected = item.path === status.path;
+          const selected = item.kind === 'file' && item.path === status.path;
           return (
             <Pressable
               style={[styles.row, selected && styles.rowOn]}
-              onPress={() => run(() => play(item.path))}>
+              onPress={() => {
+                if (item.kind === 'dir') {
+                  openFolder(item.path);
+                  return;
+                }
+                run(() => play(item.path));
+              }}>
               <Text
                 style={[styles.rowLabel, selected && styles.rowLabelOn]}
                 numberOfLines={1}>
-                {item.name}
+                {item.kind === 'dir' ? `${item.name}/` : item.name}
               </Text>
             </Pressable>
           );
@@ -219,9 +298,15 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   title: {
+    flex: 1,
     color: '#000000',
     fontSize: 28,
     fontWeight: '400',
+    marginRight: 24,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   close: {
     paddingVertical: 8,

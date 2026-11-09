@@ -4,6 +4,13 @@ import {PluginManager} from 'sn-plugin-lib';
 export type AudioTrack = {
   name: string;
   path: string;
+  kind: 'file' | 'dir';
+};
+
+export type AudioLibrary = {
+  path: string;
+  root: boolean;
+  entries: AudioTrack[];
 };
 
 export type AudioStatus = {
@@ -16,7 +23,7 @@ export type AudioStatus = {
 };
 
 type AudioNative = {
-  listTracks: () => Promise<AudioTrack[]>;
+  listTracks: (dir: string) => Promise<AudioLibrary>;
   play: (path: string) => Promise<AudioStatus>;
   pause: () => Promise<AudioStatus>;
   resume: () => Promise<AudioStatus>;
@@ -40,21 +47,35 @@ function module(): AudioNative {
 
 export const audioEvents = new NativeEventEmitter(NativeModules.AudioModule);
 
-export async function ensureReadPermission(): Promise<boolean> {
-  const permission = 'plugin.permission.FILE:READ';
-  const status = await PluginManager.hasPermission(permission);
-  if (status === 1) {
-    return true;
+const READ = 'plugin.permission.FILE:READ';
+
+export async function ensureReadPermission(
+  forceRequest = false,
+): Promise<boolean> {
+  if (!forceRequest) {
+    const status = await PluginManager.hasPermission(READ);
+    if (status === 1) {
+      return true;
+    }
   }
   const result = await PluginManager.requestPermission(
-    permission,
+    READ,
     'Read access is required to load audio files.',
   );
   return result === 1 || result === 2;
 }
 
-export function listTracks(): Promise<AudioTrack[]> {
-  return module().listTracks();
+export function isPermissionFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return typeof error === 'string' && /READ permission|1503/.test(error);
+  }
+  const code = 'code' in error ? String(error.code) : '';
+  const message = 'message' in error ? String(error.message) : '';
+  return code === 'PERMISSION' || /READ permission|1503/.test(message);
+}
+
+export function listTracks(dir?: string | null): Promise<AudioLibrary> {
+  return module().listTracks(dir ?? '');
 }
 
 export function play(path: string): Promise<AudioStatus> {
@@ -79,4 +100,8 @@ export function seekBy(deltaMs: number): Promise<AudioStatus> {
 
 export function getStatus(): Promise<AudioStatus> {
   return module().getStatus();
+}
+
+export function togglePlayback(): Promise<AudioStatus> {
+  return module().toggle();
 }

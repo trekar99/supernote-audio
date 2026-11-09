@@ -1,6 +1,7 @@
 {
   "name": "SnAudio",
-  "version": "0.1.4",
+  "version": "0.1.9",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "android": "react-native run-android",

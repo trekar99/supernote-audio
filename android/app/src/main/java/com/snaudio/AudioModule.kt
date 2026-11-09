@@ -25,12 +25,12 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun listTracks(promise: Promise) {
+  fun listTracks(dir: String, promise: Promise) {
     AudioEngine.post {
       try {
-        promise.resolve(AudioEngine.listTracks())
+        promise.resolve(AudioEngine.listDirectory(dir))
       } catch (error: Exception) {
-        promise.reject("LIST_FAILED", error.message, error)
+        reject(promise, "LIST_FAILED", error)
       }
     }
   }
@@ -42,7 +42,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
         AudioEngine.play(reactContext.applicationContext, path)
         promise.resolve(AudioEngine.status())
       } catch (error: Exception) {
-        promise.reject("PLAY_FAILED", error.message, error)
+        reject(promise, "PLAY_FAILED", error)
       }
     }
   }
@@ -54,7 +54,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
         AudioEngine.pause()
         promise.resolve(AudioEngine.status())
       } catch (error: Exception) {
-        promise.reject("PAUSE_FAILED", error.message, error)
+        reject(promise, "PAUSE_FAILED", error)
       }
     }
   }
@@ -66,7 +66,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
         AudioEngine.resume(reactContext.applicationContext)
         promise.resolve(AudioEngine.status())
       } catch (error: Exception) {
-        promise.reject("RESUME_FAILED", error.message, error)
+        reject(promise, "RESUME_FAILED", error)
       }
     }
   }
@@ -78,7 +78,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
         AudioEngine.toggle(reactContext.applicationContext)
         promise.resolve(AudioEngine.status())
       } catch (error: Exception) {
-        promise.reject("TOGGLE_FAILED", error.message, error)
+        reject(promise, "TOGGLE_FAILED", error)
       }
     }
   }
@@ -90,7 +90,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
         AudioEngine.stop()
         promise.resolve(AudioEngine.status())
       } catch (error: Exception) {
-        promise.reject("STOP_FAILED", error.message, error)
+        reject(promise, "STOP_FAILED", error)
       }
     }
   }
@@ -102,7 +102,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
         AudioEngine.seekBy(deltaMs.toInt())
         promise.resolve(AudioEngine.status())
       } catch (error: Exception) {
-        promise.reject("SEEK_FAILED", error.message, error)
+        reject(promise, "SEEK_FAILED", error)
       }
     }
   }
@@ -114,7 +114,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
         AudioEngine.setLoop(enabled)
         promise.resolve(AudioEngine.status())
       } catch (error: Exception) {
-        promise.reject("LOOP_FAILED", error.message, error)
+        reject(promise, "LOOP_FAILED", error)
       }
     }
   }
@@ -125,7 +125,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
       try {
         promise.resolve(AudioEngine.status(live = true))
       } catch (error: Exception) {
-        promise.reject("STATUS_FAILED", error.message, error)
+        reject(promise, "STATUS_FAILED", error)
       }
     }
   }
@@ -136,6 +136,19 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun removeListeners(count: Double) {
+  }
+
+  private fun reject(promise: Promise, code: String, error: Exception) {
+    val detail = error.message ?: ""
+    if (detail.contains("READ permission") || detail.contains("1503")) {
+      promise.reject(
+        "PERMISSION",
+        "Read permission is required to load audio files.",
+        error,
+      )
+      return
+    }
+    promise.reject(code, "Could not load audio", error)
   }
 
   private fun emitStatus() {
