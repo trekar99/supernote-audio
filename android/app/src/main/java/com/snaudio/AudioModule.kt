@@ -13,6 +13,7 @@ class AudioModule(private val reactContext: ReactApplicationContext) :
 
   override fun initialize() {
     super.initialize()
+    AudioEngine.watchScreen(reactContext)
     AudioEngine.setOnChange {
       AudioEngine.post { emitStatus() }
     }

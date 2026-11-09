@@ -1,10 +1,14 @@
 package com.snaudio
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import com.facebook.react.bridge.Arguments
@@ -30,9 +34,31 @@ object AudioEngine {
   private var reportedPosition: Int? = null
   private var focusRequest: AudioFocusRequest? = null
   private var onChange: (() -> Unit)? = null
+  private var screenReceiver: BroadcastReceiver? = null
 
   fun setOnChange(listener: (() -> Unit)?) {
     onChange = listener
+  }
+
+  fun watchScreen(context: Context) {
+    if (screenReceiver != null) {
+      return
+    }
+    val app = context.applicationContext
+    val receiver = object : BroadcastReceiver() {
+      override fun onReceive(c: Context?, intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+          post { pause() }
+        }
+      }
+    }
+    val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      app.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+    } else {
+      app.registerReceiver(receiver, filter)
+    }
+    screenReceiver = receiver
   }
 
   fun post(block: () -> Unit) {
@@ -101,9 +127,7 @@ object AudioEngine {
   fun pause() {
     val current = player
     if (prepared && current != null && safePlaying(current)) {
-      if (reportedPosition == null) {
-        reportedPosition = safePosition(current)
-      }
+      reportedPosition = safePosition(current)
       current.pause()
       notifyChange()
     }
@@ -112,6 +136,7 @@ object AudioEngine {
   fun resume(context: Context) {
     val current = player
     if (prepared && current != null && !current.isPlaying) {
+      reportedPosition = safePosition(current)
       requestFocus(context)
       current.start()
       notifyChange()

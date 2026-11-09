@@ -23,7 +23,6 @@ import {
   play,
   resume,
   seekBy,
-  setLoop,
   stop,
   type AudioStatus,
   type AudioTrack,
@@ -83,6 +82,26 @@ function App(): React.JSX.Element {
     return () => subscription.remove();
   }, [apply, load]);
 
+  useEffect(() => {
+    if (!status.playing) {
+      return;
+    }
+    let active = true;
+    const timer = setInterval(() => {
+      getStatus()
+        .then(next => {
+          if (active) {
+            setStatus(next);
+          }
+        })
+        .catch(() => {});
+    }, 1000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [status.playing]);
+
   const run = useCallback(
     async (action: () => Promise<AudioStatus>) => {
       if (busy) {
@@ -116,6 +135,13 @@ function App(): React.JSX.Element {
     }
   };
 
+  const controls = [
+    {label: status.playing ? 'Pause' : 'Play', onPress: onPlayPause},
+    {label: 'Stop', onPress: () => run(stop)},
+    {label: 'Back 15s', onPress: () => run(() => seekBy(-SEEK_MS))},
+    {label: 'Forward 15s', onPress: () => run(() => seekBy(SEEK_MS))},
+  ];
+
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
@@ -141,9 +167,11 @@ function App(): React.JSX.Element {
           const selected = item.path === status.path;
           return (
             <Pressable
-              style={[styles.row, selected && styles.rowSelected]}
+              style={[styles.row, selected && styles.rowOn]}
               onPress={() => run(() => play(item.path))}>
-              <Text style={[styles.rowLabel, selected && styles.rowLabelSelected]}>
+              <Text
+                style={[styles.rowLabel, selected && styles.rowLabelOn]}
+                numberOfLines={1}>
                 {item.name}
               </Text>
             </Pressable>
@@ -151,31 +179,24 @@ function App(): React.JSX.Element {
         }}
       />
 
-      <Text style={styles.time}>
-        {formatTime(status.positionMs)} / {formatTime(status.durationMs)}
-      </Text>
-      {message && tracks.length > 0 ? (
-        <Text style={styles.error}>{message}</Text>
-      ) : null}
+      <View style={styles.readout}>
+        <Text style={styles.time}>
+          {formatTime(status.positionMs)} / {formatTime(status.durationMs)}
+        </Text>
+        {message && tracks.length > 0 ? (
+          <Text style={styles.error}>{message}</Text>
+        ) : null}
+      </View>
 
-      <View style={styles.controls}>
-        <Pressable style={styles.button} onPress={onPlayPause}>
-          <Text style={styles.buttonLabel}>{status.playing ? 'Pause' : 'Play'}</Text>
-        </Pressable>
-        <Pressable style={styles.button} onPress={() => run(stop)}>
-          <Text style={styles.buttonLabel}>Stop</Text>
-        </Pressable>
-        <Pressable style={styles.button} onPress={() => run(() => seekBy(-SEEK_MS))}>
-          <Text style={styles.buttonLabel}>Back 15s</Text>
-        </Pressable>
-        <Pressable style={styles.button} onPress={() => run(() => seekBy(SEEK_MS))}>
-          <Text style={styles.buttonLabel}>Forward 15s</Text>
-        </Pressable>
-        <Pressable
-          style={styles.button}
-          onPress={() => run(() => setLoop(!status.loop))}>
-          <Text style={styles.buttonLabel}>{status.loop ? 'Loop on' : 'Loop off'}</Text>
-        </Pressable>
+      <View style={styles.transport}>
+        {controls.map((control, index) => (
+          <Pressable
+            key={control.label}
+            style={[styles.button, index > 0 && styles.buttonDivider]}
+            onPress={control.onPress}>
+            <Text style={styles.buttonLabel}>{control.label}</Text>
+          </Pressable>
+        ))}
       </View>
     </View>
   );
@@ -185,26 +206,26 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#ffffff',
-    paddingHorizontal: 32,
-    paddingTop: 28,
-    paddingBottom: 32,
+    paddingHorizontal: 48,
+    paddingTop: 36,
+    paddingBottom: 28,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#000000',
+    paddingBottom: 16,
   },
   title: {
     color: '#000000',
-    fontSize: 36,
-    fontWeight: '600',
+    fontSize: 28,
+    fontWeight: '400',
   },
   close: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    paddingHorizontal: 28,
-    paddingVertical: 14,
+    paddingVertical: 8,
+    paddingLeft: 24,
   },
   closeLabel: {
     color: '#000000',
@@ -215,52 +236,57 @@ const styles = StyleSheet.create({
   },
   empty: {
     color: '#000000',
-    fontSize: 24,
-    paddingVertical: 24,
+    fontSize: 22,
+    paddingVertical: 28,
   },
   row: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    paddingHorizontal: 20,
-    paddingVertical: 22,
-    marginBottom: 12,
+    justifyContent: 'center',
+    minHeight: 76,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#000000',
     backgroundColor: '#ffffff',
   },
-  rowSelected: {
+  rowOn: {
     backgroundColor: '#000000',
   },
   rowLabel: {
     color: '#000000',
-    fontSize: 24,
+    fontSize: 22,
   },
-  rowLabelSelected: {
+  rowLabelOn: {
     color: '#ffffff',
+  },
+  readout: {
+    alignItems: 'center',
+    paddingTop: 28,
+    paddingBottom: 24,
   },
   time: {
     color: '#000000',
-    fontSize: 32,
-    marginTop: 8,
-    marginBottom: 16,
+    fontSize: 48,
+    fontVariant: ['tabular-nums'],
   },
   error: {
     color: '#000000',
     fontSize: 18,
-    marginBottom: 12,
+    marginTop: 12,
+    textAlign: 'center',
   },
-  controls: {
+  transport: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    borderTopWidth: 1,
+    borderTopColor: '#000000',
   },
   button: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 22,
-    paddingVertical: 18,
-    marginRight: 12,
-    marginBottom: 12,
-    minHeight: 72,
+    flex: 1,
+    minHeight: 96,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  buttonDivider: {
+    borderLeftWidth: 1,
+    borderLeftColor: '#000000',
   },
   buttonLabel: {
     color: '#000000',

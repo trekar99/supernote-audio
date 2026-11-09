@@ -65,6 +65,10 @@ export function pause(): Promise<AudioStatus> {
   return module().pause();
 }
 
+export function resume(): Promise<AudioStatus> {
+  return module().resume();
+}
+
 export function stop(): Promise<AudioStatus> {
   return module().stop();
 }
@@ -73,14 +77,6 @@ export function seekBy(deltaMs: number): Promise<AudioStatus> {
   return module().seekBy(deltaMs);
 }
 
-export function setLoop(enabled: boolean): Promise<AudioStatus> {
-  return module().setLoop(enabled);
-}
-
 export function getStatus(): Promise<AudioStatus> {
   return module().getStatus();
-}
-
-export function togglePlayback(): Promise<AudioStatus> {
-  return module().toggle();
 }
